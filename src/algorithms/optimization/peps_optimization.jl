@@ -247,6 +247,7 @@ function fixedpoint(
         fg_evaluations = numfg,
         costs = convergence_history[:, 1],
         gradnorms = convergence_history[:, 2],
+        alphahistory = convergence_history[:, 3],
         truncation_errors,
         condition_numbers,
         gradnorms_unitcell,
