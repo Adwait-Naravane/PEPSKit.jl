@@ -1,5 +1,8 @@
 using TensorKit
 using PEPSKit
+using PEPSKit: siterotl90, siterotr90, siterot180
+using MPSKit: add_physical_charge
+using MPSKitModels: a_number, nꜛnꜜ, contract_onesite
 using Test
 
 vds = (ℂ^2, Rep[U₁](1 => 1, -1 => 1), Rep[SU₂](1 / 2 => 1))
@@ -42,4 +45,88 @@ vds = (ℂ^2, Rep[U₁](1 => 1, -1 => 1), Rep[SU₂](1 / 2 => 1))
     @test op5 isa LocalOperator
     @test physicalspace(op5) == physical_spaces
     @test length(op5.terms) == 2
+end
+
+@testset "Charge shifting" begin
+    lattice = InfiniteSquare(1, 1)
+    elt = ComplexF64
+    U = 30.0
+
+    # bosonic case
+    cutoff = 2
+    N = a_number(elt, U1Irrep; cutoff)
+    H_U = U / 2 * contract_onesite(N, N - id(domain(N)))
+    spaces = fill(space(H_U, 1), (lattice.Nrows, lattice.Ncols))
+    H = LocalOperator(spaces, ((1, 1),) => H_U)
+    tr_before = tr(last(only(H.terms)))
+    # shift to unit filling
+    caux = U1Irrep(1)
+    H_shifted = add_physical_charge(H, fill(caux, size(H.lattice)...))
+    # check if spaces were correctly shifted
+    @test H_shifted.lattice == map(
+        fuse, H.lattice, fill(U1Space(caux => 1)', size(H.lattice)...)
+    )
+    # check if trace is properly preserved
+    tr_after = tr(last(only(H_shifted.terms)))
+    @test abs(tr_before - tr_after) / abs(tr_before) < 1.0e-12
+
+    # fermionic case
+    symmetry = FermionParity ⊠ U1Irrep
+    H_U = U * nꜛnꜜ(elt, U1Irrep, Trivial)
+    spaces = fill(space(H_U, 1), (lattice.Nrows, lattice.Ncols))
+    H = LocalOperator(spaces, ((1, 1),) => H_U)
+    tr_before = tr(last(only(H.terms)))
+    # shift to unit filling
+    caux = symmetry((1, 1))
+    H_shifted = add_physical_charge(H, fill(caux, size(H.lattice)...))
+    # check if spaces were correctly shifted
+    @test H_shifted.lattice == map(
+        fuse, H.lattice, fill(Vect[symmetry](caux => 1)', size(H.lattice)...)
+    )
+    # check if trace is properly preserved
+    tr_after = tr(last(only(H_shifted.terms)))
+    @test abs(tr_before - tr_after) / abs(tr_before) < 1.0e-12
+end
+
+unitcells = [(1, 1), (2, 3), (3, 3), (4, 3)]
+@testset "Site rotations on $uc unitcell" for uc in unitcells
+    unrotated_inds = collect(CartesianIndices(uc))
+    # use reverse(uc) to account for transposing when using rotl90, rotr90 on non-square unit cells
+    rr_rotated_inds = rotr90(siterotr90.(collect(CartesianIndices(reverse(uc))), Ref(reverse(uc))))
+    ll_rotated_inds = rotl90(siterotl90.(collect(CartesianIndices(reverse(uc))), Ref(reverse(uc))))
+    half_rotated_inds = rot180(siterot180.(collect(CartesianIndices(uc)), Ref(uc)))
+
+    @test unrotated_inds == rr_rotated_inds
+    @test unrotated_inds == ll_rotated_inds
+    @test unrotated_inds == half_rotated_inds
+end
+
+op_1x1 = LocalOperator([ℂ^2;;], ((1, 1), (1, 2)) => randn(ℂ^2, ℂ^2) ⊗ randn(ℂ^2, ℂ^2))
+op_2x2 = add_physical_charge(
+    j1_j2_model(ComplexF64, U1Irrep, InfiniteSquare(2, 2)),
+    [
+        U1Irrep(-1 // 2) U1Irrep(1 // 2)
+        U1Irrep(1 // 2) U1Irrep(-1 // 2)
+    ] # staggered charges to create non-uniform physical spaces
+)
+op_2x3 = LocalOperator(
+    [
+        ℂ^1 ℂ^2 ℂ^3
+        ℂ^4 ℂ^5 ℂ^6
+    ],
+
+    (
+        ((1, 1), (1, 2)) => randn(ℂ^1, ℂ^1) ⊗ randn(ℂ^2, ℂ^2),
+        ((2, 1), (1, 1)) => randn(ℂ^4, ℂ^4) ⊗ randn(ℂ^1, ℂ^1),
+        ((1, 2), (2, 3)) => randn(ℂ^2, ℂ^2) ⊗ randn(ℂ^6, ℂ^6),
+        ((1, 3), (2, 2)) => randn(ℂ^3, ℂ^3) ⊗ randn(ℂ^5, ℂ^5),
+    )...
+)
+operators = [op_1x1, op_2x2, op_2x3]
+@testset "Operator rotations on $(size(op)) operator" for op in operators
+    @test rot180(rot180(op)) == op
+    @test rotl90(rotl90(op)) == rot180(op) == rotr90(rotr90(op))
+    @test physicalspace(rotl90(op)) == rotl90(physicalspace(op))
+    @test physicalspace(rotr90(op)) == rotr90(physicalspace(op))
+    @test physicalspace(rot180(op)) == rot180(physicalspace(op))
 end

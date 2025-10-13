@@ -94,14 +94,20 @@ end
         end
     end
     if GROUP == "ALL" || GROUP == "EXAMPLES"
-        @time @safetestset "Transverse Field Ising model" begin
+        @time @safetestset "Transverse field Ising model" begin
             include("examples/tf_ising.jl")
+        end
+        @time @safetestset "Transverse field Ising model at finite temperature" begin
+            include("examples/tf_ising_finiteT.jl")
         end
         @time @safetestset "Heisenberg model" begin
             include("examples/heisenberg.jl")
         end
         @time @safetestset "J1-J2 model" begin
             include("examples/j1j2_model.jl")
+        end
+        @time @safetestset "J1-J2 model at finite temperature" begin
+            include("examples/j1j2_finiteT.jl")
         end
         @time @safetestset "P-wave superconductor" begin
             include("examples/pwave.jl")

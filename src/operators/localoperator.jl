@@ -79,16 +79,16 @@ function checklattice(::Type{Bool}, arg1, arg2, args...)
     return checklattice(Bool, arg1, arg2) && checklattice(Bool, arg2, args...)
 end
 function checklattice(::Type{Bool}, H1::LocalOperator, H2::LocalOperator)
-    return H1.lattice == H2.lattice
+    return physicalspace(H1) == physicalspace(H2)
 end
 function checklattice(::Type{Bool}, peps::InfinitePEPS, O::LocalOperator)
-    return size(peps) == size(O.lattice)
+    return physicalspace(peps) == physicalspace(O)
 end
 function checklattice(::Type{Bool}, H::LocalOperator, peps::InfinitePEPS)
     return checklattice(Bool, peps, H)
 end
 function checklattice(::Type{Bool}, pepo::InfinitePEPO, O::LocalOperator)
-    return size(pepo, 3) == 1 && reshape(physicalspace(pepo), size(pepo, 1), size(pepo, 2)) == physicalspace(O)
+    return size(pepo, 3) == 1 && physicalspace(pepo) == physicalspace(O)
 end
 function checklattice(::Type{Bool}, O::LocalOperator, pepo::InfinitePEPO)
     return checklattice(Bool, pepo, O)
@@ -144,30 +144,55 @@ end
 Base.:-(O::LocalOperator) = -1 * O
 Base.:-(O1::LocalOperator, O2::LocalOperator) = O1 + (-O2)
 
+# VectorInterface
+# ---------------
+
+function VI.scalartype(::Type{<:LocalOperator{T}}) where {T}
+    return promote_type((scalartype(last(fieldtypes(p))) for p in fieldtypes(T))...)
+end
+
+# Equivalence
+# -----------
+
+function Base.:(==)(O₁::LocalOperator, O₂::LocalOperator)
+    lat = O₁.lattice == O₂.lattice
+    terms = all(zip(O₁.terms, O₂.terms)) do (t₁, t₂)
+        return t₁ == t₂
+    end
+    return lat && terms
+end
+
 # Rotation
 # ----------------------
 
 # rotation of a lattice site
-# TODO: type piracy
-Base.rotl90(site::CartesianIndex{2}) = CartesianIndex(2 - site[2], site[1])
-Base.rotr90(site::CartesianIndex{2}) = CartesianIndex(site[2], 2 - site[1])
-Base.rot180(site::CartesianIndex{2}) = CartesianIndex(2 - site[1], 2 - site[2])
+# (copy logic from Base.rotl90, Base.rotr90, Base.rot180)
+function siterotl90(site::CartesianIndex{2}, unitcell::NTuple{2, Int})
+    return CartesianIndex(unitcell[2] + 1 - site[2], site[1])
+end
+function siterotr90(site::CartesianIndex{2}, unitcell::NTuple{2, Int})
+    return CartesianIndex(site[2], unitcell[1] + 1 - site[1])
+end
+function siterot180(site::CartesianIndex{2}, unitcell::NTuple{2, Int})
+    return CartesianIndex(unitcell[1] + 1 - site[1], unitcell[2] + 1 - site[2])
+end
 
 function Base.rotr90(H::LocalOperator)
+    Hsize = size(H.lattice)
     lattice2 = rotr90(H.lattice)
-    terms2 = ((Tuple(rotr90(site) for site in sites) => op) for (sites, op) in H.terms)
+    terms2 = ((Tuple(siterotr90(site, Hsize) for site in sites) => op) for (sites, op) in H.terms)
     return LocalOperator(lattice2, terms2...)
 end
-
 function Base.rotl90(H::LocalOperator)
+    Hsize = size(H.lattice)
     lattice2 = rotl90(H.lattice)
-    terms2 = ((Tuple(rotl90(site) for site in sites) => op) for (sites, op) in H.terms)
+    terms2 = ((Tuple(siterotl90(site, Hsize) for site in sites) => op) for (sites, op) in H.terms)
     return LocalOperator(lattice2, terms2...)
 end
-
 function Base.rot180(H::LocalOperator)
+    Hsize = size(H.lattice)
     lattice2 = rot180(H.lattice)
-    terms2 = ((Tuple(rot180(site) for site in sites) => op) for (sites, op) in H.terms)
+    terms2 = ((Tuple(siterot180(site, Hsize) for site in sites) => op) for (sites, op) in H.terms)
     return LocalOperator(lattice2, terms2...)
 end
 
@@ -186,18 +211,19 @@ TensorKit.spacetype(::Type{T}) where {S, T <: LocalOperator{<:Any, S}} = S
     end
     f_dag_es = map(1:N) do i
         j = 3 * (i - 1) + 1
-        return tensorexpr(:(fs[$i]), -(N + i), (j + 1, j + 2))
+        return tensorexpr(:(twistdual(fs[$i]', 1:2)), (j + 1, j + 2), -(N + i))
     end
     multiplication_ex = Expr(
-        :call, :*, op_e, f_es..., map(x -> Expr(:call, :conj, x), f_dag_es)...
+        :call, :*, op_e, f_es..., f_dag_es...
     )
     return macroexpand(@__MODULE__, :(return @tensor $op_out_e := $multiplication_ex))
 end
 
 """
-$(SIGNATURES)
+    _fuse_ids(op::AbstractTensorMap{T, S, N, N}, [Ps::NTuple{N, S}]) where {T, S, N}
 
-Fuse identities on auxiliary physical spaces into a given operator.
+Fuse identities on auxiliary physical spaces `Ps` into a given operator `op`.
+When `Ps` is not specified, it defaults to the domain spaces of `op`.
 """
 function _fuse_ids(op::AbstractTensorMap{T, S, N, N}, Ps::NTuple{N, S}) where {T, S, N}
     # make isomorphisms
@@ -206,6 +232,9 @@ function _fuse_ids(op::AbstractTensorMap{T, S, N, N}, Ps::NTuple{N, S}) where {T
     end
     # and fuse them into the operator
     return _fuse_isomorphisms(op, fs)
+end
+function _fuse_ids(op::AbstractTensorMap{T, S, N, N}) where {T, S, N}
+    return _fuse_ids(op, Tuple(domain(op)))
 end
 
 """

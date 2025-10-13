@@ -13,19 +13,12 @@ struct InfinitePEPO{T <: PEPOTensor}
     function InfinitePEPO(A::Array{T, 3}) where {T <: PEPOTensor}
         # space checks
         for (d, w, h) in Tuple.(CartesianIndices(A))
-            codomain_physicalspace(A[d, w, h]) ==
-                domain_physicalspace(A[d, w, _next(h, end)]) ||
+            codomain_physicalspace(A[d, w, h]) == domain_physicalspace(A[d, w, _next(h, end)]) ||
                 throw(SpaceMismatch("Physical space at site $((d, w, h)) does not match."))
             north_virtualspace(A[d, w, h]) == south_virtualspace(A[_prev(d, end), w, h])' ||
-                throw(
-                SpaceMismatch(
-                    "North virtual space at site $((d, w, h)) does not match."
-                ),
-            )
+                throw(SpaceMismatch("North virtual space at site $((d, w, h)) does not match."))
             east_virtualspace(A[d, w, h]) == west_virtualspace(A[d, _next(w, end), h])' ||
-                throw(
-                SpaceMismatch("East virtual space at site $((d, w, h)) does not match.")
-            )
+                throw(SpaceMismatch("East virtual space at site $((d, w, h)) does not match."))
         end
         return new{T}(A)
     end
@@ -150,10 +143,8 @@ end
 TensorKit.spacetype(::Type{P}) where {P <: InfinitePEPO} = spacetype(eltype(P))
 virtualspace(T::InfinitePEPO, r::Int, c::Int, h::Int, dir) = virtualspace(T[r, c, h], dir)
 domain_physicalspace(T::InfinitePEPO, r::Int, c::Int) = domain_physicalspace(T[r, c, 1])
-function codomain_physicalspace(T::InfinitePEPO, r::Int, c::Int)
-    return codomain_physicalspace(T[r, c, end])
-end
-physicalspace(T::InfinitePEPO) = physicalspace.(Ref(T), 1:size(T, 1), 1:size(T, 2))
+codomain_physicalspace(T::InfinitePEPO, r::Int, c::Int) = codomain_physicalspace(T[r, c, end])
+physicalspace(T::InfinitePEPO) = [physicalspace(T, row, col) for row in axes(T, 1), col in axes(T, 2)]
 function physicalspace(T::InfinitePEPO, r::Int, c::Int)
     codomain_physicalspace(T, r, c) == domain_physicalspace(T, r, c) || throw(
         SpaceMismatch(
@@ -210,9 +201,12 @@ end
 
 ## Rotations
 
-Base.rotl90(A::InfinitePEPO) = InfinitePEPO(stack(rotl90, eachslice(unitcell(A); dims = 3)))
-Base.rotr90(A::InfinitePEPO) = InfinitePEPO(stack(rotr90, eachslice(unitcell(A); dims = 3)))
-Base.rot180(A::InfinitePEPO) = InfinitePEPO(stack(rot180, eachslice(unitcell(A); dims = 3)))
+Base.rotl90(A::InfinitePEPO) =
+    InfinitePEPO(stack(rotl90, eachslice(rotl90.(unitcell(A)); dims = 3)))
+Base.rotr90(A::InfinitePEPO) =
+    InfinitePEPO(stack(rotr90, eachslice(rotr90.(unitcell(A)); dims = 3)))
+Base.rot180(A::InfinitePEPO) =
+    InfinitePEPO(stack(rot180, eachslice(rot180.(unitcell(A)); dims = 3)))
 
 ## Chainrules
 
